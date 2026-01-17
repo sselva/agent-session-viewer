@@ -607,6 +607,45 @@
             color: var(--text-muted);
             margin-top: 12px;
         }
+
+        /* Context Menu */
+        .context-menu {
+            position: fixed;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px 0;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            display: none;
+            min-width: 150px;
+        }
+
+        .context-menu.visible {
+            display: block;
+        }
+
+        .context-menu-item {
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .context-menu-item:hover {
+            background: var(--surface-hover);
+        }
+
+        .context-menu-item.danger {
+            color: #f85149;
+        }
+
+        .context-menu-item.danger:hover {
+            background: rgba(248, 81, 73, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -785,6 +824,13 @@
         </div>
     </div>
 
+    <!-- Context menu for session items -->
+    <div class="context-menu" id="context-menu">
+        <div class="context-menu-item danger" id="delete-session-btn">
+            🗑 Delete Session
+        </div>
+    </div>
+
     <script>
         // State
         let sessions = [];
@@ -840,6 +886,11 @@
         const statusText = document.getElementById('status-text');
         const syncStatusEl = document.getElementById('sync-status');
         const lastSyncEl = document.getElementById('last-sync');
+
+        // Context menu elements
+        const contextMenu = document.getElementById('context-menu');
+        const deleteSessionBtn = document.getElementById('delete-session-btn');
+        let contextMenuSessionId = null;
 
         // API calls
         async function fetchProjects() {
@@ -1136,7 +1187,64 @@
             // Add click handlers
             sessionList.querySelectorAll('.session-item').forEach(item => {
                 item.addEventListener('click', () => loadSession(item.dataset.id));
+
+                // Add right-click handler for context menu
+                item.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    showContextMenu(e, item.dataset.id);
+                });
             });
+        }
+
+        function showContextMenu(event, sessionId) {
+            contextMenuSessionId = sessionId;
+            contextMenu.style.left = `${event.pageX}px`;
+            contextMenu.style.top = `${event.pageY}px`;
+            contextMenu.classList.add('visible');
+        }
+
+        function hideContextMenu() {
+            contextMenu.classList.remove('visible');
+            contextMenuSessionId = null;
+        }
+
+        async function deleteSession() {
+            if (!contextMenuSessionId) return;
+
+            try {
+                const res = await fetch(`/api/sessions/${encodeURIComponent(contextMenuSessionId)}`, {
+                    method: 'DELETE',
+                });
+
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.detail || 'Failed to delete session');
+                }
+
+                // If this was the currently viewed session, clear the view
+                if (currentSession?.id === contextMenuSessionId) {
+                    currentSession = null;
+                    currentSessionData = null;
+                    updateExportButton();
+                    if (eventSource) {
+                        eventSource.close();
+                        eventSource = null;
+                    }
+                    content.innerHTML = `
+                        <div class="empty-state">
+                            <h2>Session deleted</h2>
+                            <p>Select another session from the sidebar</p>
+                        </div>
+                    `;
+                }
+
+                // Reload the session list
+                await loadSessions();
+                hideContextMenu();
+            } catch (e) {
+                alert(`Failed to delete session: ${e.message}`);
+                hideContextMenu();
+            }
         }
 
         function renderSession(data) {
@@ -1492,6 +1600,19 @@
         githubTokenInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') saveGithubToken();
         });
+
+        // Context menu event handlers
+        deleteSessionBtn.addEventListener('click', deleteSession);
+
+        // Hide context menu when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!contextMenu.contains(e.target)) {
+                hideContextMenu();
+            }
+        });
+
+        // Hide context menu on scroll
+        document.addEventListener('scroll', hideContextMenu, true);
 
         // Close modal on overlay click
         shortcutsModal.addEventListener('click', (e) => {

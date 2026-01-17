@@ -104,3 +104,74 @@ class TestGetSessions:
              patch.object(db, "DATA_DIR", tmp_path):
             sessions = db.get_sessions()
             assert sessions == []
+
+
+class TestDeleteSession:
+    """Tests for delete_session functionality."""
+
+    def test_delete_session_removes_from_database(self, test_db, tmp_path):
+        """Deleting a session should remove it from the database."""
+        with patch.object(db, "DB_PATH", test_db), \
+             patch.object(db, "DATA_DIR", tmp_path):
+            # Create a session
+            db.upsert_session("test-session", "project1", message_count=5)
+
+            # Verify it exists
+            session = db.get_session("test-session")
+            assert session is not None
+
+            # Delete the session
+            db.delete_session("test-session")
+
+            # Verify it's gone
+            session = db.get_session("test-session")
+            assert session is None
+
+    def test_delete_session_removes_messages(self, test_db, tmp_path):
+        """Deleting a session should also delete its messages."""
+        with patch.object(db, "DB_PATH", test_db), \
+             patch.object(db, "DATA_DIR", tmp_path):
+            # Create a session with messages
+            db.upsert_session("test-session", "project1", message_count=2)
+            db.insert_message("test-session", "msg-1", "user", "Hello", "2024-01-01T00:00:00")
+            db.insert_message("test-session", "msg-2", "assistant", "Hi", "2024-01-01T00:00:01")
+
+            # Verify messages exist
+            messages = db.get_session_messages("test-session")
+            assert len(messages) == 2
+
+            # Delete the session
+            db.delete_session("test-session")
+
+            # Verify messages are gone
+            messages = db.get_session_messages("test-session")
+            assert len(messages) == 0
+
+    def test_delete_nonexistent_session(self, test_db, tmp_path):
+        """Deleting a nonexistent session should not raise an error."""
+        with patch.object(db, "DB_PATH", test_db), \
+             patch.object(db, "DATA_DIR", tmp_path):
+            # Should not raise an error
+            db.delete_session("nonexistent-session")
+
+    def test_delete_session_preserves_other_sessions(self, test_db, tmp_path):
+        """Deleting one session should not affect other sessions."""
+        with patch.object(db, "DB_PATH", test_db), \
+             patch.object(db, "DATA_DIR", tmp_path):
+            # Create multiple sessions
+            db.upsert_session("session-1", "project1", message_count=5)
+            db.upsert_session("session-2", "project1", message_count=3)
+            db.upsert_session("session-3", "project1", message_count=7)
+
+            # Delete one session
+            db.delete_session("session-2")
+
+            # Verify other sessions still exist
+            session1 = db.get_session("session-1")
+            session3 = db.get_session("session-3")
+            assert session1 is not None
+            assert session3 is not None
+
+            # Verify deleted session is gone
+            session2 = db.get_session("session-2")
+            assert session2 is None

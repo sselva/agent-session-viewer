@@ -171,6 +171,15 @@ def delete_session_messages(session_id: str):
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
 
 
+def delete_session(session_id: str):
+    """Delete a session and all its messages from the database."""
+    with get_db() as conn:
+        # Delete messages first (cascade should handle this, but being explicit)
+        conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        # Delete the session
+        conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+
 def get_message_count(session_id: str) -> int:
     """Get the number of messages for a session."""
     with get_db() as conn:

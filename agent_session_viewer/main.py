@@ -270,6 +270,30 @@ async def get_session(session_id: str):
     }
 
 
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session and its source file."""
+    session = db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Find and delete the source file
+    source_path = sync_module.find_source_file(session_id)
+    if source_path and source_path.exists():
+        try:
+            source_path.unlink()
+        except (PermissionError, OSError) as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete source file: {str(e)}"
+            )
+
+    # Delete from database
+    db.delete_session(session_id)
+
+    return {"success": True, "session_id": session_id}
+
+
 @app.get("/api/sessions/{session_id}/export")
 async def export_session(session_id: str):
     """Export session as a self-contained HTML file."""

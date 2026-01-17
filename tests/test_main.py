@@ -1,5 +1,8 @@
 """Tests for main module export functionality."""
 
+import tempfile
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 import pytest
 
 from agent_session_viewer.main import (
@@ -9,6 +12,7 @@ from agent_session_viewer.main import (
     escape_html,
     generate_export_html,
 )
+from agent_session_viewer import db, sync as sync_module
 
 
 class TestSanitizeFilename:
@@ -143,3 +147,90 @@ class TestGenerateExportHtml:
         filename = sanitize_filename("my project#1.html")
         assert '"' not in filename
         assert '\n' not in filename
+
+
+class TestDeleteSessionEndpoint:
+    """Tests for the DELETE /api/sessions/{session_id} endpoint."""
+
+    def test_delete_removes_source_file_and_database_entry(self, tmp_path):
+        """Delete endpoint should remove both source file and database entry."""
+        # Create a temporary session file
+        session_file = tmp_path / "test-session.jsonl"
+        session_file.write_text('{"role": "user", "content": "test"}\n')
+
+        # Mock the database and sync module
+        test_db_path = tmp_path / "test.db"
+        with patch.object(db, "DB_PATH", test_db_path), \
+             patch.object(db, "DATA_DIR", tmp_path), \
+             patch.object(sync_module, "find_source_file", return_value=session_file):
+
+            # Initialize DB and create a session
+            db.init_db()
+            db.upsert_session("test-session", "test-project", message_count=1)
+
+            # Import the app after patching
+            from agent_session_viewer.main import app
+            from fastapi.testclient import TestClient
+            client = TestClient(app)
+
+            # Verify file and DB entry exist
+            assert session_file.exists()
+            assert db.get_session("test-session") is not None
+
+            # Delete the session
+            response = client.delete("/api/sessions/test-session")
+
+            # Verify response
+            assert response.status_code == 200
+            assert response.json()["success"] is True
+
+            # Verify file is deleted
+            assert not session_file.exists()
+
+            # Verify DB entry is deleted
+            assert db.get_session("test-session") is None
+
+    def test_delete_nonexistent_session_returns_404(self, tmp_path):
+        """Deleting a nonexistent session should return 404."""
+        test_db_path = tmp_path / "test.db"
+        with patch.object(db, "DB_PATH", test_db_path), \
+             patch.object(db, "DATA_DIR", tmp_path):
+
+            # Initialize empty DB
+            db.init_db()
+
+            from agent_session_viewer.main import app
+            from fastapi.testclient import TestClient
+            client = TestClient(app)
+
+            # Try to delete nonexistent session
+            response = client.delete("/api/sessions/nonexistent")
+
+            # Verify 404 response
+            assert response.status_code == 404
+            assert "not found" in response.json()["detail"].lower()
+
+    def test_delete_handles_missing_source_file(self, tmp_path):
+        """Delete should succeed even if source file doesn't exist."""
+        test_db_path = tmp_path / "test.db"
+        with patch.object(db, "DB_PATH", test_db_path), \
+             patch.object(db, "DATA_DIR", tmp_path), \
+             patch.object(sync_module, "find_source_file", return_value=None):
+
+            # Initialize DB and create a session
+            db.init_db()
+            db.upsert_session("test-session", "test-project", message_count=1)
+
+            from agent_session_viewer.main import app
+            from fastapi.testclient import TestClient
+            client = TestClient(app)
+
+            # Delete the session (source file doesn't exist)
+            response = client.delete("/api/sessions/test-session")
+
+            # Should still succeed
+            assert response.status_code == 200
+            assert response.json()["success"] is True
+
+            # DB entry should be deleted
+            assert db.get_session("test-session") is None
